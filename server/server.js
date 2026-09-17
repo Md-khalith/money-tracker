@@ -2,11 +2,13 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
 
-// Ensure DB is initialized
-require('./db/database');
+// Load environment variables from .env
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
+const { initializeDatabase } = require('./db/database');
 const categoryRoutes = require('./routes/categoryRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
@@ -36,11 +38,12 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
-// Health check endpoints for cloud load balancers and orchestrators
+// Health check endpoints for cloud load balancers and monitoring
 const healthHandler = (req, res) => {
   res.json({
     status: 'ok',
     service: 'money-tracker-api',
+    database: process.env.DATABASE_URL ? 'postgresql' : 'unconfigured',
     timestamp: new Date().toISOString()
   });
 };
@@ -62,8 +65,22 @@ if (fs.existsSync(clientDistPath)) {
 // Error handling middleware
 app.use(errorHandler);
 
-app.listen(PORT, HOST, () => {
-  console.log(`Money Tracker server listening on http://${HOST}:${PORT}`);
-});
+async function startServer() {
+  if (process.env.DATABASE_URL) {
+    try {
+      await initializeDatabase();
+    } catch (err) {
+      console.error('Database initialization error:', err.message);
+    }
+  } else {
+    console.warn('\n⚠️  Set DATABASE_URL in .env and run me again.\n');
+  }
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Money Tracker server listening on http://${HOST}:${PORT}`);
+  });
+}
+
+startServer();
 
 module.exports = app;

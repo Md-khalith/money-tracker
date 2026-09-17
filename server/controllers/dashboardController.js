@@ -1,10 +1,10 @@
 const dashboardService = require('../services/dashboardService');
 
 const dashboardController = {
-  getDashboard(req, res, next) {
+  async getDashboard(req, res, next) {
     try {
       const { startDate, endDate } = req.query;
-      const data = dashboardService.getDashboardData({ startDate, endDate });
+      const data = await dashboardService.getDashboardData({ startDate, endDate });
       res.json(data);
     } catch (err) {
       next(err);

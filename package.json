@@ -11,6 +11,7 @@
     "start": "node server/server.js",
     "install:all": "npm install && npm --prefix client install",
     "db:reset": "node server/db/reset.js",
+    "db:test": "node server/db/test-connection.js",
     "test": "node server/tests/api.test.js",
     "mcp": "node mcp/server.js",
     "mcp:remote": "node mcp/httpServer.js"
@@ -20,7 +21,8 @@
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -4,8 +4,8 @@ const {
   ListToolsRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 
-// Ensure database is initialized
-require('../server/db/database');
+// Database initialization
+const { initializeDatabase } = require('../server/db/database');
 const categoryService = require('../server/services/categoryService');
 const { transactionService, ALLOWED_PAYMENT_METHODS } = require('../server/services/transactionService');
 const dashboardService = require('../server/services/dashboardService');
@@ -45,8 +45,8 @@ function getMonthDateRange(monthStr) {
 }
 
 // Helper to resolve category by name or ID
-function resolveCategoryId(categoryInput) {
-  const categories = categoryService.getAllCategories();
+async function resolveCategoryId(categoryInput) {
+  const categories = await categoryService.getAllCategories();
   
   if (typeof categoryInput === 'number' || /^\d+$/.test(categoryInput)) {
     const id = Number(categoryInput);
@@ -181,7 +181,7 @@ function createMcpServerInstance() {
             throw new Error('Category name is required.');
           }
 
-          const created = categoryService.createCategory({
+          const created = await categoryService.createCategory({
             name: catName.trim(),
             icon: icon ? icon.trim() : null
           });
@@ -199,13 +199,13 @@ function createMcpServerInstance() {
         case 'add_transaction': {
           const { amount, type, category, payment_method, transaction_date, description } = args;
 
-          const resolvedCategory = resolveCategoryId(category);
+          const resolvedCategory = await resolveCategoryId(category);
 
           const todayStr = new Date().toISOString().slice(0, 10);
           const dateToUse = transaction_date || todayStr;
           const methodToUse = payment_method || 'UPI';
 
-          const created = transactionService.createTransaction({
+          const created = await transactionService.createTransaction({
             amount,
             type,
             categoryId: resolvedCategory.id,
@@ -236,7 +236,7 @@ function createMcpServerInstance() {
           const { month } = args;
           const { startDate, endDate, monthName, yearMonth } = getMonthDateRange(month);
 
-          const dashboardData = dashboardService.getDashboardData({ startDate, endDate });
+          const dashboardData = await dashboardService.getDashboardData({ startDate, endDate });
           const { spendingByCategory, totalSpent, totalReceived, balance } = dashboardData;
 
           let output = `📊 Spending Breakdown by Category — ${monthName} (${yearMonth})\n`;
@@ -269,7 +269,7 @@ function createMcpServerInstance() {
         }
 
         case 'list_categories': {
-          const categories = categoryService.getAllCategories();
+          const categories = await categoryService.getAllCategories();
           let text = `📋 Available Categories (${categories.length}):\n\n`;
           categories.forEach((cat) => {
             text += `- [ID ${cat.id}] ${cat.icon ? cat.icon + ' ' : ''}${cat.name} (${cat.transactionCount} transactions)\n`;
@@ -288,7 +288,7 @@ function createMcpServerInstance() {
         case 'get_monthly_summary': {
           const { month } = args;
           const { startDate, endDate, monthName, yearMonth } = getMonthDateRange(month);
-          const data = dashboardService.getDashboardData({ startDate, endDate });
+          const data = await dashboardService.getDashboardData({ startDate, endDate });
 
           let text = `📈 Financial Summary — ${monthName} (${yearMonth})\n`;
           text += `─────────────────────────────────────────\n`;

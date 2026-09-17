@@ -1,28 +1,31 @@
-const db = require('../db/database');
+const { pool } = require('../db/database');
 
 const categoryService = {
-  getAllCategories() {
-    const stmt = db.prepare(`
+  async getAllCategories() {
+    const res = await pool.query(`
       SELECT 
         c.id,
         c.name,
         c.icon,
-        c.created_at AS createdAt,
-        COUNT(t.id) AS transactionCount
+        c.created_at AS "createdAt",
+        COUNT(t.id)::int AS "transactionCount"
       FROM categories c
       LEFT JOIN transactions t ON c.id = t.category_id
-      GROUP BY c.id
-      ORDER BY c.name COLLATE NOCASE ASC
+      GROUP BY c.id, c.name, c.icon, c.created_at
+      ORDER BY LOWER(c.name) ASC
     `);
-    return stmt.all();
+    return res.rows;
   },
 
-  getCategoryById(id) {
-    const stmt = db.prepare('SELECT id, name, icon, created_at AS createdAt FROM categories WHERE id = ?');
-    return stmt.get(id);
+  async getCategoryById(id) {
+    const res = await pool.query(
+      'SELECT id, name, icon, created_at AS "createdAt" FROM categories WHERE id = $1',
+      [id]
+    );
+    return res.rows[0] || null;
   },
 
-  createCategory({ name, icon }) {
+  async createCategory({ name, icon }) {
     if (!name || !name.trim()) {
       const error = new Error('Category name is required.');
       error.statusCode = 400;
@@ -30,21 +33,27 @@ const categoryService = {
     }
 
     const trimmedName = name.trim();
-    const existing = db.prepare('SELECT id FROM categories WHERE LOWER(name) = LOWER(?)').get(trimmedName);
-    if (existing) {
+    const existing = await pool.query(
+      'SELECT id FROM categories WHERE LOWER(name) = LOWER($1)',
+      [trimmedName]
+    );
+
+    if (existing.rows.length > 0) {
       const error = new Error('A category with this name already exists.');
       error.statusCode = 409;
       throw error;
     }
 
-    const stmt = db.prepare('INSERT INTO categories (name, icon) VALUES (?, ?)');
-    const info = stmt.run(trimmedName, icon ? icon.trim() : null);
+    const res = await pool.query(
+      'INSERT INTO categories (name, icon) VALUES ($1, $2) RETURNING id, name, icon, created_at AS "createdAt"',
+      [trimmedName, icon ? icon.trim() : null]
+    );
 
-    return this.getCategoryById(info.lastInsertRowid);
+    return res.rows[0];
   },
 
-  updateCategory(id, { name, icon }) {
-    const existing = this.getCategoryById(id);
+  async updateCategory(id, { name, icon }) {
+    const existing = await this.getCategoryById(id);
     if (!existing) {
       const error = new Error('Category not found.');
       error.statusCode = 404;
@@ -58,35 +67,45 @@ const categoryService = {
     }
 
     const trimmedName = name.trim();
-    const duplicate = db.prepare('SELECT id FROM categories WHERE LOWER(name) = LOWER(?) AND id != ?').get(trimmedName, id);
-    if (duplicate) {
+    const duplicate = await pool.query(
+      'SELECT id FROM categories WHERE LOWER(name) = LOWER($1) AND id != $2',
+      [trimmedName, id]
+    );
+
+    if (duplicate.rows.length > 0) {
       const error = new Error('Another category with this name already exists.');
       error.statusCode = 409;
       throw error;
     }
 
-    const stmt = db.prepare('UPDATE categories SET name = ?, icon = ? WHERE id = ?');
-    stmt.run(trimmedName, icon ? icon.trim() : null, id);
+    const res = await pool.query(
+      'UPDATE categories SET name = $1, icon = $2 WHERE id = $3 RETURNING id, name, icon, created_at AS "createdAt"',
+      [trimmedName, icon ? icon.trim() : null, id]
+    );
 
-    return this.getCategoryById(id);
+    return res.rows[0];
   },
 
-  deleteCategory(id) {
-    const existing = this.getCategoryById(id);
+  async deleteCategory(id) {
+    const existing = await this.getCategoryById(id);
     if (!existing) {
       const error = new Error('Category not found.');
       error.statusCode = 404;
       throw error;
     }
 
-    const usage = db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE category_id = ?').get(id);
-    if (usage && usage.count > 0) {
+    const usage = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM transactions WHERE category_id = $1',
+      [id]
+    );
+
+    if (usage.rows[0] && usage.rows[0].count > 0) {
       const error = new Error('Category is currently being used by transactions.');
       error.statusCode = 409;
       throw error;
     }
 
-    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    await pool.query('DELETE FROM categories WHERE id = $1', [id]);
     return { message: 'Category deleted successfully.' };
   }
 };

@@ -11,17 +11,14 @@ const defaultCategories = [
   { name: 'Other', icon: '📦' }
 ];
 
-function seedDatabase(db) {
-  const countRow = db.prepare('SELECT COUNT(*) AS count FROM categories').get();
-  if (countRow && countRow.count === 0) {
-    const insertStmt = db.prepare('INSERT INTO categories (name, icon) VALUES (?, ?)');
-    const insertMany = db.transaction((categories) => {
-      for (const cat of categories) {
-        insertStmt.run(cat.name, cat.icon);
-      }
-    });
-    insertMany(defaultCategories);
-    console.log('Seeded default categories into database.');
+async function seedDatabase(clientOrPool) {
+  for (const cat of defaultCategories) {
+    await clientOrPool.query(
+      `INSERT INTO categories (name, icon) 
+       VALUES ($1, $2) 
+       ON CONFLICT (name) DO NOTHING`,
+      [cat.name, cat.icon]
+    );
   }
 }
 

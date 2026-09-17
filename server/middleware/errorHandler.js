@@ -1,21 +1,24 @@
 function errorHandler(err, req, res, next) {
-  // Log full error on server side
-  console.error('[Error]:', err);
+  // Log error on server side (without sensitive credentials)
+  console.error('[Error]:', err.message || err);
 
   const statusCode = err.statusCode || 500;
   let message = err.message || 'An unexpected server error occurred.';
 
-  // If it's a raw SQLite error without explicit message
-  if (err.code && err.code.startsWith('SQLITE')) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+  // PostgreSQL Error Codes
+  if (err.code) {
+    if (err.code === '23505') {
       message = 'A record with these unique details already exists.';
       return res.status(409).json({ error: message });
     }
-    if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+    if (err.code === '23503') {
       message = 'Operation violates referential integrity.';
       return res.status(409).json({ error: message });
     }
-    message = 'A database error occurred.';
+    if (err.code === '28P01' || err.code === '28000') {
+      message = 'Database authentication failed.';
+      return res.status(500).json({ error: message });
+    }
   }
 
   res.status(statusCode).json({

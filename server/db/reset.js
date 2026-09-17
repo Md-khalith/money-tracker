@@ -1,35 +1,40 @@
-const Database = require('better-sqlite3');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
+const { pool, initializeDatabase } = require('./database');
 const { seedDatabase } = require('./seed');
 
-const dbPath = process.env.DATABASE_PATH
-  ? path.resolve(process.cwd(), process.env.DATABASE_PATH)
-  : path.resolve(__dirname, '../../data/money-tracker.db');
+async function resetDatabase() {
+  if (!process.env.DATABASE_URL) {
+    console.error('\n❌ DATABASE_URL is not set in .env');
+    console.error('Set DATABASE_URL in .env and run me again.\n');
+    process.exit(1);
+  }
 
-const db = new Database(dbPath);
+  console.log('Connecting to PostgreSQL database...');
+  const client = await pool.connect();
+  try {
+    console.log('Clearing all transactions and categories...');
+    await client.query('TRUNCATE TABLE transactions, categories RESTART IDENTITY CASCADE');
 
-console.log('Clearing all database records...');
+    console.log('Re-seeding default categories...');
+    await seedDatabase(client);
 
-db.pragma('foreign_keys = OFF');
-db.exec('DELETE FROM transactions;');
-db.exec('DELETE FROM categories;');
+    const txRes = await client.query('SELECT COUNT(*)::int AS count FROM transactions');
+    const catRes = await client.query('SELECT COUNT(*)::int AS count FROM categories');
 
-try {
-  db.exec("DELETE FROM sqlite_sequence WHERE name IN ('transactions', 'categories');");
-} catch (err) {
-  // sqlite_sequence might not exist if tables were never populated with autoincrement
+    console.log('\n✓ PostgreSQL database reset complete:');
+    console.log(`- Transactions: ${txRes.rows[0].count}`);
+    console.log(`- Categories:   ${catRes.rows[0].count} (default seed)\n`);
+  } catch (err) {
+    console.error('Failed to reset database:', err.message);
+    process.exit(1);
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
 
-db.pragma('foreign_keys = ON');
-
-// Re-seed the 10 clean default categories
-seedDatabase(db);
-
-const txCount = db.prepare('SELECT COUNT(*) as count FROM transactions').get().count;
-const catCount = db.prepare('SELECT COUNT(*) as count FROM categories').get().count;
-
-console.log(`Database reset complete:`);
-console.log(`- Transactions: ${txCount}`);
-console.log(`- Categories: ${catCount} (default seed)`);
-
-db.close();
+resetDatabase();

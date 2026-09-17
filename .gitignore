@@ -1,10 +1,23 @@
+# Environment & Secrets (Never commit)
+.env
+.env.*
+!.env.example
+
 # Dependencies
 node_modules/
+**/node_modules/
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Database files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.sqlite*
+!data/.gitkeep
+
+# Build and production output
+dist/
+build/
+client/dist/
 
 # Logs
 *.log
@@ -12,17 +25,20 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# Database (must never be committed)
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
-!data/.gitkeep
+# AI Agent Configuration
+.agents/
 
-# Build artifacts
-dist/
-build/
-client/dist/
+# Internal specification files
+01-*.md
+02-*.md
+03-*.md
+04-*.md
+05-*.md
+06-*.md
+07-*.md
+
+# Keep README tracked
+!README.md
 
 # OS files
 .DS_Store

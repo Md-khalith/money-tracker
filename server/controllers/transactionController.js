@@ -1,10 +1,10 @@
 const { transactionService } = require('../services/transactionService');
 
 const transactionController = {
-  getAll(req, res, next) {
+  async getAll(req, res, next) {
     try {
       const { startDate, endDate, type, categoryId, paymentMethod, search } = req.query;
-      const result = transactionService.getTransactions({
+      const result = await transactionService.getTransactions({
         startDate,
         endDate,
         type,
@@ -18,9 +18,9 @@ const transactionController = {
     }
   },
 
-  getById(req, res, next) {
+  async getById(req, res, next) {
     try {
-      const transaction = transactionService.getTransactionById(req.params.id);
+      const transaction = await transactionService.getTransactionById(req.params.id);
       if (!transaction) {
         return res.status(404).json({ error: 'Transaction not found.' });
       }
@@ -30,37 +30,37 @@ const transactionController = {
     }
   },
 
-  create(req, res, next) {
+  async create(req, res, next) {
     try {
-      const created = transactionService.createTransaction(req.body);
+      const created = await transactionService.createTransaction(req.body);
       res.status(201).json(created);
     } catch (err) {
       next(err);
     }
   },
 
-  update(req, res, next) {
+  async update(req, res, next) {
     try {
-      const updated = transactionService.updateTransaction(req.params.id, req.body);
+      const updated = await transactionService.updateTransaction(req.params.id, req.body);
       res.json(updated);
     } catch (err) {
       next(err);
     }
   },
 
-  delete(req, res, next) {
+  async delete(req, res, next) {
     try {
-      const result = transactionService.deleteTransaction(req.params.id);
+      const result = await transactionService.deleteTransaction(req.params.id);
       res.json(result);
     } catch (err) {
       next(err);
     }
   },
 
-  exportCSV(req, res, next) {
+  async exportCSV(req, res, next) {
     try {
       const { startDate, endDate, type, categoryId, paymentMethod, search } = req.query;
-      const csv = transactionService.exportToCSV({
+      const csv = await transactionService.exportToCSV({
         startDate,
         endDate,
         type,

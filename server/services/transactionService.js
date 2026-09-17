@@ -1,4 +1,4 @@
-const db = require('../db/database');
+const { pool } = require('../db/database');
 
 const ALLOWED_PAYMENT_METHODS = [
   'Cash',
@@ -10,7 +10,7 @@ const ALLOWED_PAYMENT_METHODS = [
 ];
 
 const transactionService = {
-  validateTransactionData(data) {
+  async validateTransactionData(data) {
     const { amount, type, categoryId, paymentMethod, transactionDate } = data;
 
     const parsedAmount = Number(amount);
@@ -26,8 +26,8 @@ const transactionService = {
       throw error;
     }
 
-    const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
-    if (!category) {
+    const category = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (category.rows.length === 0) {
       const error = new Error('Invalid category selected.');
       error.statusCode = 400;
       throw error;
@@ -55,21 +55,21 @@ const transactionService = {
     };
   },
 
-  getTransactions(filters = {}) {
+  async getTransactions(filters = {}) {
     const { startDate, endDate, type, categoryId, paymentMethod, search } = filters;
 
     let sql = `
       SELECT 
         t.id,
-        t.amount,
+        t.amount::numeric AS amount,
         t.type,
-        t.category_id AS categoryId,
-        c.name AS categoryName,
-        c.icon AS categoryIcon,
-        t.payment_method AS paymentMethod,
+        t.category_id AS "categoryId",
+        c.name AS "categoryName",
+        c.icon AS "categoryIcon",
+        t.payment_method AS "paymentMethod",
         t.description,
-        t.transaction_date AS transactionDate,
-        t.created_at AS createdAt
+        to_char(t.transaction_date, 'YYYY-MM-DD') AS "transactionDate",
+        t.created_at AS "createdAt"
       FROM transactions t
       JOIN categories c ON t.category_id = c.id
       WHERE 1=1
@@ -77,40 +77,42 @@ const transactionService = {
     const params = [];
 
     if (startDate) {
-      sql += ' AND t.transaction_date >= ?';
       params.push(startDate);
+      sql += ` AND t.transaction_date >= $${params.length}::date`;
     }
 
     if (endDate) {
-      sql += ' AND t.transaction_date <= ?';
       params.push(endDate);
+      sql += ` AND t.transaction_date <= $${params.length}::date`;
     }
 
     if (type && ['SPENT', 'RECEIVED'].includes(type)) {
-      sql += ' AND t.type = ?';
       params.push(type);
+      sql += ` AND t.type = $${params.length}`;
     }
 
     if (categoryId && !isNaN(Number(categoryId))) {
-      sql += ' AND t.category_id = ?';
       params.push(Number(categoryId));
+      sql += ` AND t.category_id = $${params.length}`;
     }
 
     if (paymentMethod && paymentMethod !== 'All') {
-      sql += ' AND t.payment_method = ?';
       params.push(paymentMethod);
+      sql += ` AND t.payment_method = $${params.length}`;
     }
 
     if (search && search.trim()) {
-      sql += ' AND (LOWER(t.description) LIKE ? OR LOWER(c.name) LIKE ?)';
-      const term = `%${search.trim().toLowerCase()}%`;
-      params.push(term, term);
+      params.push(`%${search.trim().toLowerCase()}%`);
+      sql += ` AND (LOWER(COALESCE(t.description, '')) LIKE $${params.length} OR LOWER(c.name) LIKE $${params.length})`;
     }
 
     sql += ' ORDER BY t.transaction_date DESC, t.id DESC';
 
-    const stmt = db.prepare(sql);
-    const transactions = stmt.all(...params);
+    const res = await pool.query(sql, params);
+    const transactions = res.rows.map((t) => ({
+      ...t,
+      amount: Number(t.amount)
+    }));
 
     return {
       transactions,
@@ -118,63 +120,67 @@ const transactionService = {
     };
   },
 
-  getTransactionById(id) {
-    const stmt = db.prepare(`
+  async getTransactionById(id) {
+    const res = await pool.query(`
       SELECT 
         t.id,
-        t.amount,
+        t.amount::numeric AS amount,
         t.type,
-        t.category_id AS categoryId,
-        c.name AS categoryName,
-        c.icon AS categoryIcon,
-        t.payment_method AS paymentMethod,
+        t.category_id AS "categoryId",
+        c.name AS "categoryName",
+        c.icon AS "categoryIcon",
+        t.payment_method AS "paymentMethod",
         t.description,
-        t.transaction_date AS transactionDate,
-        t.created_at AS createdAt
+        to_char(t.transaction_date, 'YYYY-MM-DD') AS "transactionDate",
+        t.created_at AS "createdAt"
       FROM transactions t
       JOIN categories c ON t.category_id = c.id
-      WHERE t.id = ?
-    `);
-    return stmt.get(id);
+      WHERE t.id = $1
+    `, [id]);
+
+    if (res.rows.length === 0) return undefined;
+
+    const row = res.rows[0];
+    return {
+      ...row,
+      amount: Number(row.amount)
+    };
   },
 
-  createTransaction(data) {
-    const validated = this.validateTransactionData(data);
+  async createTransaction(data) {
+    const validated = await this.validateTransactionData(data);
 
-    const stmt = db.prepare(`
+    const res = await pool.query(`
       INSERT INTO transactions (amount, type, category_id, payment_method, description, transaction_date)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    const info = stmt.run(
+      VALUES ($1, $2, $3, $4, $5, $6::date)
+      RETURNING id
+    `, [
       validated.amount,
       validated.type,
       validated.categoryId,
       validated.paymentMethod,
       validated.description,
       validated.transactionDate
-    );
+    ]);
 
-    return this.getTransactionById(info.lastInsertRowid);
+    return this.getTransactionById(res.rows[0].id);
   },
 
-  updateTransaction(id, data) {
-    const existing = this.getTransactionById(id);
+  async updateTransaction(id, data) {
+    const existing = await this.getTransactionById(id);
     if (!existing) {
       const error = new Error('Transaction not found.');
       error.statusCode = 404;
       throw error;
     }
 
-    const validated = this.validateTransactionData(data);
+    const validated = await this.validateTransactionData(data);
 
-    const stmt = db.prepare(`
+    await pool.query(`
       UPDATE transactions
-      SET amount = ?, type = ?, category_id = ?, payment_method = ?, description = ?, transaction_date = ?
-      WHERE id = ?
-    `);
-
-    stmt.run(
+      SET amount = $1, type = $2, category_id = $3, payment_method = $4, description = $5, transaction_date = $6::date
+      WHERE id = $7
+    `, [
       validated.amount,
       validated.type,
       validated.categoryId,
@@ -182,25 +188,25 @@ const transactionService = {
       validated.description,
       validated.transactionDate,
       id
-    );
+    ]);
 
     return this.getTransactionById(id);
   },
 
-  deleteTransaction(id) {
-    const existing = this.getTransactionById(id);
+  async deleteTransaction(id) {
+    const existing = await this.getTransactionById(id);
     if (!existing) {
       const error = new Error('Transaction not found.');
       error.statusCode = 404;
       throw error;
     }
 
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    await pool.query('DELETE FROM transactions WHERE id = $1', [id]);
     return { message: 'Transaction deleted successfully.' };
   },
 
-  exportToCSV(filters = {}) {
-    const { transactions } = this.getTransactions(filters);
+  async exportToCSV(filters = {}) {
+    const { transactions } = await this.getTransactions(filters);
 
     // Escape fields for CSV
     const escapeCSV = (val) => {
@@ -216,7 +222,7 @@ const transactionService = {
       escapeCSV(t.categoryName),
       escapeCSV(t.paymentMethod),
       escapeCSV(t.type),
-      escapeCSV(t.amount.toFixed(2))
+      escapeCSV(Number(t.amount).toFixed(2))
     ].join(','));
 
     return [headers.join(','), ...rows].join('\r\n');
