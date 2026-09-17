@@ -7,7 +7,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
-const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
+const crypto = require('crypto');
+const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { createMcpServerInstance } = require('./tools');
 
 const app = express();
@@ -15,118 +16,125 @@ app.set('trust proxy', 1);
 
 const PORT = process.env.MCP_PORT || process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
-const MCP_API_KEY = process.env.MCP_API_KEY;
 const API_BASE_URL = (process.env.API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '');
 
-// CORS setup
+// Parse JSON request bodies while allowing raw streams for streaming
+app.use(express.json());
+
+// CORS configuration for remote Streamable HTTP MCP clients
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'Mcp-Session-Id',
+    'Mcp-Protocol-Version'
+  ],
+  exposedHeaders: [
+    'Mcp-Session-Id',
+    'Mcp-Protocol-Version'
+  ]
 }));
 
-// Optional Authentication Middleware
-function authMiddleware(req, res, next) {
-  if (!MCP_API_KEY) {
-    return next();
-  }
+// Active Streamable HTTP session transports: sessionId -> StreamableHTTPServerTransport
+const sessions = new Map();
 
-  const authHeader = req.headers['authorization'];
-  const apiKeyHeader = req.headers['x-api-key'];
-  const queryKey = req.query.apiKey;
-
-  let token = null;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (apiKeyHeader) {
-    token = apiKeyHeader.trim();
-  } else if (queryKey) {
-    token = queryKey.trim();
-  }
-
-  if (token === MCP_API_KEY) {
-    return next();
-  }
-
-  res.status(401).json({
-    error: 'Unauthorized: Invalid or missing MCP API key.'
+// Helper to create a new session with StreamableHTTPServerTransport
+async function createNewSession() {
+  let transport;
+  transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => crypto.randomUUID(),
+    onsessioninitialized: (id) => {
+      sessions.set(id, transport);
+    },
+    onsessionclosed: (id) => {
+      sessions.delete(id);
+    }
   });
+
+  const server = createMcpServerInstance();
+  await server.connect(transport);
+  return transport;
 }
 
-// Store active SSE transports by sessionId
-const activeTransports = new Map();
-
-// Service Info / Root endpoint
+// Root / Service Info
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     service: 'money-tracker-mcp-remote',
-    transport: 'sse',
-    apiBaseUrl: API_BASE_URL,
-    endpoints: {
-      health: '/health',
-      sse: '/sse',
-      messages: '/messages'
-    },
-    auth: MCP_API_KEY ? 'enabled' : 'none'
+    transport: 'streamable-http',
+    endpoint: '/mcp',
+    apiBaseUrl: API_BASE_URL
   });
 });
 
-// Health Check
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     service: 'money-tracker-mcp-remote',
-    transport: 'sse',
-    activeSessions: activeTransports.size,
+    transport: 'streamable-http',
+    endpoint: '/mcp',
+    activeSessions: sessions.size,
     apiBaseUrl: API_BASE_URL,
     timestamp: new Date().toISOString()
   });
 });
 
-// SSE Connection Endpoint
-app.get('/sse', authMiddleware, async (req, res) => {
-  console.log(`[MCP-SSE] Incoming connection from ${req.ip}`);
-
-  // Create a new SSEServerTransport pointing client to POST /messages
-  const transport = new SSEServerTransport('/messages', res);
-  const server = createMcpServerInstance();
-
-  activeTransports.set(transport.sessionId, transport);
-
-  req.on('close', () => {
-    console.log(`[MCP-SSE] Session ${transport.sessionId} closed`);
-    activeTransports.delete(transport.sessionId);
-  });
-
-  try {
-    await server.connect(transport);
-    console.log(`[MCP-SSE] Session ${transport.sessionId} connected`);
-  } catch (err) {
-    console.error(`[MCP-SSE] Connection error for session ${transport.sessionId}:`, err);
-    activeTransports.delete(transport.sessionId);
-  }
-});
-
-// Message Handling Endpoint
-app.post('/messages', authMiddleware, async (req, res) => {
-  const sessionId = req.query.sessionId;
-
-  if (!sessionId) {
-    return res.status(400).json({ error: 'Missing required query parameter: sessionId' });
-  }
-
-  const transport = activeTransports.get(sessionId);
-  if (!transport) {
-    return res.status(404).json({ error: `Session "${sessionId}" not found or has expired.` });
+// Streamable HTTP Endpoint: /mcp
+app.all('/mcp', async (req, res) => {
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
   }
 
   try {
-    await transport.handlePostMessage(req, res);
+    const sessionId = req.headers['mcp-session-id'];
+
+    // 1. If an existing session ID is provided in request headers
+    if (sessionId) {
+      const transport = sessions.get(sessionId);
+      if (!transport) {
+        return res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found' },
+          id: null
+        });
+      }
+
+      if (req.method === 'DELETE') {
+        try {
+          await transport.handleRequest(req, res, req.body);
+        } finally {
+          sessions.delete(sessionId);
+        }
+        return;
+      }
+
+      return await transport.handleRequest(req, res, req.body);
+    }
+
+    // 2. If no session ID is provided, this must be an initialization POST request
+    if (req.method === 'POST') {
+      const transport = await createNewSession();
+      return await transport.handleRequest(req, res, req.body);
+    }
+
+    // 3. Any GET or DELETE without a session ID is invalid
+    return res.status(400).json({
+      jsonrpc: '2.0',
+      error: { code: -32600, message: 'Missing required Mcp-Session-Id header' },
+      id: null
+    });
   } catch (err) {
-    console.error(`[MCP-SSE] Error handling message for session ${sessionId}:`, err);
+    console.error('[MCP Streamable HTTP Error]:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to process message' });
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: err.message || 'Internal server error' },
+        id: null
+      });
     }
   }
 });
@@ -134,7 +142,6 @@ app.post('/messages', authMiddleware, async (req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`Money Tracker Remote MCP Server listening on http://${HOST}:${PORT}`);
   console.log(`- Health: http://${HOST}:${PORT}/health`);
-  console.log(`- SSE Endpoint: http://${HOST}:${PORT}/sse`);
+  console.log(`- Streamable HTTP Endpoint: http://${HOST}:${PORT}/mcp`);
   console.log(`- Backend API: ${API_BASE_URL}`);
-  console.log(`- Auth: ${MCP_API_KEY ? 'Enabled (MCP_API_KEY)' : 'Disabled (Public)'}`);
 });

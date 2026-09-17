@@ -157,9 +157,9 @@ Money Tracker includes a built-in MCP server that allows AI assistants (like Cla
   ```bash
   npm run mcp
   ```
-- **Remote Cloud HTTP/SSE run**:
+- **Remote Cloud Streamable HTTP run**:
   ```bash
-  npm run mcp:remote
+  npm run start:mcp
   ```
 - **Local Configuration** (`mcp_config.json`):
   ```json
@@ -172,15 +172,12 @@ Money Tracker includes a built-in MCP server that allows AI assistants (like Cla
     }
   }
   ```
-- **Remote Cloud Configuration** (SSE):
+- **Remote Cloud Configuration** (Streamable HTTP):
   ```json
   {
     "mcpServers": {
-      "money-tracker-remote": {
-        "serverUrl": "https://mcp.yourdomain.com/sse",
-        "headers": {
-          "Authorization": "Bearer <optional-mcp-api-key>"
-        }
+      "money-tracker": {
+        "url": "https://money-tracker-mcp.onrender.com/mcp"
       }
     }
   }
