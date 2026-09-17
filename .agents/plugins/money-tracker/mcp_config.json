@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "money-tracker": {
+      "command": "node",
+      "args": [
+        "e:/money-tracker/mcp/server.js"
+      ]
+    }
+  }
+}

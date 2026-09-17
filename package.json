@@ -1,0 +1,28 @@
+{
+  "name": "money-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple, self-hosted personal finance tracking web application",
+  "scripts": {
+    "dev": "concurrently -n \"server,client\" -c \"blue,green\" \"npm run server\" \"npm run client\"",
+    "server": "node server/server.js",
+    "client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "node server/server.js",
+    "install:all": "npm install && npm --prefix client install",
+    "db:reset": "node server/db/reset.js",
+    "test": "node server/tests/api.test.js",
+    "mcp": "node mcp/server.js",
+    "mcp:remote": "node mcp/httpServer.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
