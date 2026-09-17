@@ -18,18 +18,47 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Configurable CORS for separate frontend deployment
-const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map((url) => url.trim())
-  : '*';
+// Configurable CORS for separate frontend deployment (e.g. GitHub Pages / Render)
+const defaultAllowedOrigins = [
+  'https://md-khalith.github.io',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173'
+];
 
-app.use(cors({
-  origin: allowedOrigins === '*' ? true : allowedOrigins,
+const envOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((url) => url.trim().replace(/\/+$/, '')).filter(Boolean)
+  : [];
+
+const allowedOriginsList = Array.from(new Set([
+  ...defaultAllowedOrigins,
+  ...envOrigins
+]));
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. curl, health checks, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    if (
+      allowedOriginsList.includes('*') ||
+      allowedOriginsList.includes(normalizedOrigin) ||
+      process.env.NODE_ENV !== 'production'
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   exposedHeaders: ['Content-Disposition']
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 

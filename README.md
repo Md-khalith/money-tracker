@@ -188,9 +188,37 @@ Money Tracker includes a built-in MCP server that allows AI assistants (like Cla
 
 ---
 
+## Deploying Backend to Render
+
+You can deploy this Express API to [Render](https://render.com) as a **Web Service**:
+
+### Render Web Service Settings
+
+| Setting | Value |
+| :--- | :--- |
+| **Environment** | `Node` |
+| **Node Version** | `20` (or `>=18`) |
+| **Build Command** | `npm install` (or `npm install --omit=dev`) |
+| **Start Command** | `npm start` |
+| **Health Check Path** | `/health` |
+
+### Render Environment Variables
+
+Configure these in the Render Dashboard under **Environment**:
+
+| Variable | Value / Description | Required? |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | Neon PostgreSQL pooled connection string (`postgresql://...?sslmode=require`) | **Yes** |
+| `NODE_ENV` | `production` | Recommended |
+| `FRONTEND_URL` | `https://md-khalith.github.io` | Recommended |
+
+*Note: Render automatically injects `PORT`, and the server automatically binds to `0.0.0.0:${PORT}`.*
+
+---
+
 ## Cloud Deployment (Multi-Host)
 
-See the full [Cloud Deployment Guide](file:///e:/money-tracker/07-cloud-deployment.md) for deploying Frontend (Vercel/Netlify), Backend API (Render/Fly.io/VPS), and MCP Server independently.
+See the full [Cloud Deployment Guide](file:///e:/money-tracker/07-cloud-deployment.md) for deploying Frontend (GitHub Pages / Vercel), Backend API (Render), and MCP Server independently.
 
 ---
 
