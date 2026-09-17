@@ -10,11 +10,12 @@
     "build": "echo 'Backend ready for deployment'",
     "build:client": "npm --prefix client run build",
     "start": "node server/server.js",
+    "start:mcp": "node mcp/HttpServer.js",
     "install:all": "npm install && npm --prefix client install",
     "db:reset": "node server/db/reset.js",
     "db:test": "node server/db/test-connection.js",
     "mcp": "node mcp/server.js",
-    "mcp:remote": "node mcp/httpServer.js"
+    "mcp:remote": "node mcp/HttpServer.js"
   },
   "engines": {
     "node": ">=18.0.0"

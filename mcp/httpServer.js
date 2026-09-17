@@ -1,14 +1,22 @@
 #!/usr/bin/env node
 
+const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
 const { createMcpServerInstance } = require('./tools');
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || process.env.MCP_PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const MCP_API_KEY = process.env.MCP_API_KEY;
+const API_BASE_URL = (process.env.API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '');
 
 // CORS setup
 app.use(cors({
@@ -48,13 +56,30 @@ function authMiddleware(req, res, next) {
 // Store active SSE transports by sessionId
 const activeTransports = new Map();
 
-// Health Check
-app.get('/health', (req, res) => {
+// Service Info / Root endpoint
+app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     service: 'money-tracker-mcp-remote',
     transport: 'sse',
+    apiBaseUrl: API_BASE_URL,
+    endpoints: {
+      health: '/health',
+      sse: '/sse',
+      messages: '/messages'
+    },
+    auth: MCP_API_KEY ? 'enabled' : 'none'
+  });
+});
+
+// Health Check
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'money-tracker-mcp-remote',
+    transport: 'sse',
     activeSessions: activeTransports.size,
+    apiBaseUrl: API_BASE_URL,
     timestamp: new Date().toISOString()
   });
 });
@@ -110,5 +135,6 @@ app.listen(PORT, HOST, () => {
   console.log(`Money Tracker Remote MCP Server listening on http://${HOST}:${PORT}`);
   console.log(`- Health: http://${HOST}:${PORT}/health`);
   console.log(`- SSE Endpoint: http://${HOST}:${PORT}/sse`);
+  console.log(`- Backend API: ${API_BASE_URL}`);
   console.log(`- Auth: ${MCP_API_KEY ? 'Enabled (MCP_API_KEY)' : 'Disabled (Public)'}`);
 });

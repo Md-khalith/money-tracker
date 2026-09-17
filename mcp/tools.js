@@ -1,14 +1,44 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
 
-// Database initialization
-const { initializeDatabase } = require('../server/db/database');
-const categoryService = require('../server/services/categoryService');
-const { transactionService, ALLOWED_PAYMENT_METHODS } = require('../server/services/transactionService');
-const dashboardService = require('../server/services/dashboardService');
+// Configurable API base URL for communicating with the backend (Render / local)
+const API_BASE_URL = (process.env.API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '');
+const API_URL = `${API_BASE_URL}/api`;
+
+const ALLOWED_PAYMENT_METHODS = ['Cash', 'UPI', 'Debit Card', 'Credit Card', 'Bank Transfer', 'Other'];
+
+// Generic API request helper
+async function apiRequest(endpoint, options = {}) {
+  const url = `${API_URL}${endpoint}`;
+  const config = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    },
+    ...options
+  };
+
+  const res = await fetch(url, config);
+  if (!res.ok) {
+    let errMessage = `API request failed with status ${res.status}`;
+    try {
+      const json = await res.json();
+      if (json.error) errMessage = json.error;
+    } catch (_) {}
+    throw new Error(errMessage);
+  }
+
+  if (res.status === 204) return null;
+  return res.json();
+}
 
 // Helper to format Indian Rupee
 function formatINR(amount) {
@@ -44,10 +74,10 @@ function getMonthDateRange(monthStr) {
   return { startDate, endDate, monthName, yearMonth: `${year}-${pad(monthIndex + 1)}` };
 }
 
-// Helper to resolve category by name or ID
+// Helper to resolve category by name or ID via backend API
 async function resolveCategoryId(categoryInput) {
-  const categories = await categoryService.getAllCategories();
-  
+  const categories = await apiRequest('/categories');
+
   if (typeof categoryInput === 'number' || /^\d+$/.test(categoryInput)) {
     const id = Number(categoryInput);
     const found = categories.find((c) => c.id === id);
@@ -181,9 +211,12 @@ function createMcpServerInstance() {
             throw new Error('Category name is required.');
           }
 
-          const created = await categoryService.createCategory({
-            name: catName.trim(),
-            icon: icon ? icon.trim() : null
+          const created = await apiRequest('/categories', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: catName.trim(),
+              icon: icon ? icon.trim() : null
+            })
           });
 
           return {
@@ -205,13 +238,16 @@ function createMcpServerInstance() {
           const dateToUse = transaction_date || todayStr;
           const methodToUse = payment_method || 'UPI';
 
-          const created = await transactionService.createTransaction({
-            amount,
-            type,
-            categoryId: resolvedCategory.id,
-            paymentMethod: methodToUse,
-            transactionDate: dateToUse,
-            description: description || ''
+          const created = await apiRequest('/transactions', {
+            method: 'POST',
+            body: JSON.stringify({
+              amount,
+              type,
+              categoryId: resolvedCategory.id,
+              paymentMethod: methodToUse,
+              transactionDate: dateToUse,
+              description: description || ''
+            })
           });
 
           const sign = created.type === 'RECEIVED' ? '+' : '-';
@@ -236,8 +272,8 @@ function createMcpServerInstance() {
           const { month } = args;
           const { startDate, endDate, monthName, yearMonth } = getMonthDateRange(month);
 
-          const dashboardData = await dashboardService.getDashboardData({ startDate, endDate });
-          const { spendingByCategory, totalSpent, totalReceived, balance } = dashboardData;
+          const dashboardData = await apiRequest(`/dashboard?startDate=${startDate}&endDate=${endDate}`);
+          const { spendingByCategory = [], totalSpent = 0, totalReceived = 0, balance = 0 } = dashboardData;
 
           let output = `📊 Spending Breakdown by Category — ${monthName} (${yearMonth})\n`;
           output += `──────────────────────────────────────────────────\n`;
@@ -269,7 +305,7 @@ function createMcpServerInstance() {
         }
 
         case 'list_categories': {
-          const categories = await categoryService.getAllCategories();
+          const categories = await apiRequest('/categories');
           let text = `📋 Available Categories (${categories.length}):\n\n`;
           categories.forEach((cat) => {
             text += `- [ID ${cat.id}] ${cat.icon ? cat.icon + ' ' : ''}${cat.name} (${cat.transactionCount} transactions)\n`;
@@ -288,15 +324,20 @@ function createMcpServerInstance() {
         case 'get_monthly_summary': {
           const { month } = args;
           const { startDate, endDate, monthName, yearMonth } = getMonthDateRange(month);
-          const data = await dashboardService.getDashboardData({ startDate, endDate });
+          const data = await apiRequest(`/dashboard?startDate=${startDate}&endDate=${endDate}`);
+
+          const spendingByCategory = data.spendingByCategory || [];
+          const topCat = spendingByCategory[0];
+          const topCatStr = topCat ? `${topCat.icon ? topCat.icon + ' ' : ''}${topCat.categoryName} (${formatINR(topCat.total)})` : 'None';
+          const recentTx = data.recentTransactions || [];
 
           let text = `📈 Financial Summary — ${monthName} (${yearMonth})\n`;
           text += `─────────────────────────────────────────\n`;
           text += `• Total Received: ${formatINR(data.totalReceived)}\n`;
           text += `• Total Spent:    ${formatINR(data.totalSpent)}\n`;
           text += `• Net Balance:    ${formatINR(data.balance)}\n`;
-          text += `• Top Category:   ${data.spendingByCategory[0] ? `${data.spendingByCategory[0].icon || ''} ${data.spendingByCategory[0].categoryName} (${formatINR(data.spendingByCategory[0].total)})` : 'None'}\n`;
-          text += `• Recent Count:   ${data.recentTransactions.length} transactions\n`;
+          text += `• Top Category:   ${topCatStr}\n`;
+          text += `• Recent Count:   ${recentTx.length} transactions\n`;
 
           return {
             content: [
@@ -331,5 +372,6 @@ module.exports = {
   createMcpServerInstance,
   formatINR,
   getMonthDateRange,
-  resolveCategoryId
+  resolveCategoryId,
+  API_BASE_URL
 };
