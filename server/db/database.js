@@ -1,5 +1,14 @@
 const fs = require('fs');
 const path = require('path');
+
+// Ensure environment variables are loaded
+if (!process.env.DATABASE_URL) {
+  require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+  require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+  require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+  require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+}
+
 const { Pool, types } = require('pg');
 const { seedDatabase } = require('./seed');
 
