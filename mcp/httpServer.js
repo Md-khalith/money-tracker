@@ -13,7 +13,7 @@ const { createMcpServerInstance } = require('./tools');
 const app = express();
 app.set('trust proxy', 1);
 
-const PORT = process.env.PORT || process.env.MCP_PORT || 8080;
+const PORT = process.env.MCP_PORT || process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const MCP_API_KEY = process.env.MCP_API_KEY;
 const API_BASE_URL = (process.env.API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '');
